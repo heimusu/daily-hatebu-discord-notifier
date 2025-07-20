@@ -1,0 +1,45 @@
+name: Daily Random Hatena Bookmark
+on:
+  schedule:
+    - cron:  '0 22 * * *'     # JST 07:00
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install deps
+        run: npm install rss-parser axios
+
+      - name: Pick & notify Discord
+        env:
+          RSS_URL: "https://b.hatena.ne.jp/${{ secrets.HATEBU_USER }}/rss"
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          node <<'JS'
+          const Parser = require('rss-parser');
+          const axios  = require('axios');
+
+          (async () => {
+            const feed = await new Parser().parseURL(process.env.RSS_URL);
+            const pick = feed.items[Math.floor(Math.random()*feed.items.length)];
+
+            // Discord JSON format
+            const payload = {
+              username: "Hatena Random",
+              avatar_url: "https://b.hatena.ne.jp/favicon.ico",
+              embeds: [{
+                title: pick.title,
+                url:   pick.link,
+                description: "🎲 今日のはてブ",
+                footer: { text: "提供: GitHub Actions" }
+              }]
+            };
+
+            await axios.post(process.env.DISCORD_WEBHOOK_URL, payload);
+          })();
+          JS
