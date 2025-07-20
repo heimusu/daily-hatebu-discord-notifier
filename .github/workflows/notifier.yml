@@ -29,18 +29,20 @@ jobs:
             xml.replace(/&(?!#?\w+;)/g, '&amp;');
 
           (async () => {
-            // 1. RSS 文字列を取得
+            // 1. RSS を取得
             const raw = (await axios.get(process.env.RSS_URL)).data;
 
-            // 2. “壊れた &” を修正
+            // 2. "&" の修復
             const safeXml = fixBrokenEntities(raw);
 
-            // 3. パース（文字列 → フィードオブジェクト）
-            const parser = new Parser();           // デフォルト設定で OK
-            const feed   = await parser.parseString(safeXml);
+            // 3. strict=false でパース
+            const parser = new Parser({
+              xml2js: { strict: false }
+            });
+            const feed = await parser.parseString(safeXml);
 
             // 4. ランダム抽出
-            const pick = feed.items[Math.floor(Math.random()*feed.items.length)];
+            const pick = feed.items[Math.floor(Math.random() * feed.items.length)];
 
             // 5. Discord へ通知
             await axios.post(process.env.DISCORD_WEBHOOK_URL, {
@@ -57,6 +59,6 @@ jobs:
           })().catch(err => {
             console.error('FAIL', err);
             process.exit(1);
-          });
+          }); 
           JS
 
