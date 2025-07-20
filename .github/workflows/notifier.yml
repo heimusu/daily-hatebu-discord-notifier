@@ -21,15 +21,29 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           node <<'JS'
-          const Parser = require('rss-parser');
-          const axios  = require('axios');
+          const axios   = require('axios');
+          const Parser  = require('rss-parser');
+
+          // "&" → "&amp;" にサニタイズするユーティリティ
+          const fixBrokenEntities = (xml) =>
+            xml.replace(/&(?!#?\w+;)/g, '&amp;');
 
           (async () => {
-            const feed = await new Parser().parseURL(process.env.RSS_URL);
+            // 1. RSS 文字列を取得
+            const raw = (await axios.get(process.env.RSS_URL)).data;
+
+            // 2. “壊れた &” を修正
+            const safeXml = fixBrokenEntities(raw);
+
+            // 3. パース（文字列 → フィードオブジェクト）
+            const parser = new Parser();           // デフォルト設定で OK
+            const feed   = await parser.parseString(safeXml);
+
+            // 4. ランダム抽出
             const pick = feed.items[Math.floor(Math.random()*feed.items.length)];
 
-            // Discord JSON format
-            const payload = {
+            // 5. Discord へ通知
+            await axios.post(process.env.DISCORD_WEBHOOK_URL, {
               username: "Hatena Random",
               avatar_url: "https://b.hatena.ne.jp/favicon.ico",
               embeds: [{
@@ -38,8 +52,11 @@ jobs:
                 description: "🎲 今日のはてブ",
                 footer: { text: "提供: GitHub Actions" }
               }]
-            };
-
-            await axios.post(process.env.DISCORD_WEBHOOK_URL, payload);
-          })();
+            });
+            console.log(`Sent: ${pick.title}`);
+          })().catch(err => {
+            console.error('FAIL', err);
+            process.exit(1);
+          });
           JS
+
