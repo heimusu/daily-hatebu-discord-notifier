@@ -17,61 +17,33 @@ jobs:
 
       - name: Pick & notify Discord
         env:
-          RSS_URL: "https://b.hatena.ne.jp/${{ secrets.HATEBU_USER }}/rss" # ←① URL修正
+          RSS_URL: "https://b.hatena.ne.jp/${{ secrets.HATEBU_USER }}/bookmark.rss"
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           node <<'JS'
           const axios  = require('axios');
           const Parser = require('rss-parser');
-
-          // 1) "&" → "&amp;" を補正
-          const fixBrokenEntities = (xml) =>
-            xml.replace(/&(?!#?\w+;)/g, '&amp;');
-
-          // 2) RSS / Atom らしいか簡易判定
-          const looksLikeFeed = (s) => /<(rss|feed|rdf:RDF)\b/i.test(s);
+          const RSS_URL = process.env.HATEBU_RSS_URL;
 
           (async () => {
-            // --- RSS取得 ---
-            const res = await axios.get(process.env.RSS_URL, {
-              responseType: 'text',
-              headers: {
-                'User-Agent': 'HatenaRandomBot/1.0 (+https://github.com/<repo>)',
-                'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8'
-              },
-              validateStatus: s => s >= 200 && s < 400
-            });
-
-            if (!looksLikeFeed(res.data)) {
-              throw new Error(
-                `Unexpected response (status ${res.status}, type ${res.headers['content-type']})`
-              );
+            const res = await axios.get(RSS_URL, { responseType: 'text', maxRedirects: 5 });
+            // HTML が返って来ると先頭が <html になる
+            if (!/^<\?xml|^<rdf:RDF|^<rss/i.test(res.data.trim())) {
+              throw new Error(`Not RSS – URL or privacy settingが違います\nURL=${RSS_URL}`);
             }
 
-            // --- "&" の修復 + パース ---
-            const safeXml = fixBrokenEntities(res.data);
-            const parser  = new Parser({ xml2js: { strict: false } });
-            const feed    = await parser.parseString(safeXml);
+            const parser = new Parser();
+            const feed   = await parser.parseString(res.data);
 
-            // --- ランダム抽出 ---
-            if (!feed.items?.length) throw new Error('No items in feed');
+            if (!feed.items?.length) throw new Error('公開ブックマークが 0 件です');
             const pick = feed.items[Math.floor(Math.random() * feed.items.length)];
 
-            // --- Discord通知 ---
             await axios.post(process.env.DISCORD_WEBHOOK_URL, {
               username: 'Hatena Random',
               avatar_url: 'https://b.hatena.ne.jp/favicon.ico',
-              embeds: [{
-                title: pick.title,
-                url:   pick.link,
-                description: '🎲 今日のはてブ',
-                footer: { text: '提供: GitHub Actions' }
-              }]
+              embeds: [{ title: pick.title, url: pick.link, description: '🎲 今日のはてブ' }]
             });
-            console.log(`Sent: ${pick.title}`);
-          })().catch(err => {
-            console.error('FAIL', err.message || err);
-            process.exit(1);
-          });
+            console.log('Sent:', pick.title);
+          })().catch(e => { console.error('FAIL', e.message); process.exit(1); });
           JS
 
