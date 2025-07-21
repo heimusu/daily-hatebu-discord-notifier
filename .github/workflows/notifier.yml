@@ -23,13 +23,12 @@ jobs:
           node <<'JS'
           const axios  = require('axios');
           const Parser = require('rss-parser');
-          const RSS_URL = process.env.HATEBU_RSS_URL;
 
           (async () => {
-            const res = await axios.get(RSS_URL, { responseType: 'text', maxRedirects: 5 });
+            const res = await axios.get(process.env.RSS_URL, { responseType: 'text', maxRedirects: 5 });
             // HTML が返って来ると先頭が <html になる
             if (!/^<\?xml|^<rdf:RDF|^<rss/i.test(res.data.trim())) {
-              throw new Error(`Not RSS – URL or privacy settingが違います\nURL=${RSS_URL}`);
+              throw new Error(`Not RSS – URL or privacy settingが違います\nURL=${process.env.RSS_URL}`);
             }
 
             const parser = new Parser();
