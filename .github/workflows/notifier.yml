@@ -24,25 +24,59 @@ jobs:
           const axios  = require('axios');
           const Parser = require('rss-parser');
 
+          // ---- 設定値 ----
+          const RSS_BASE = process.env.RSS_URL;          // 1 ページ目 URL
+          const PAGE_MAX = 5;                            // 20 件 × 5 ＝ 100 件
+          const PICK_NUM = 5;                            // Discord へ送る件数
+          const parser   = new Parser();                 // 厳格モードのままで OK
+
+          // "&" を修正する簡易フィルタ
+          const fix = (xml) => xml.replace(/&(?!#?\w+;)/g, '&amp;');
+
+          // ---- RSS をまとめて取得 ----
+          const fetchPage = async (page) => {
+            const url = page === 1 ? RSS_BASE : `${RSS_BASE}?page=${page}`;
+            const res = await axios.get(url, { responseType: 'text', maxRedirects: 5 });
+            if (!/^<\?xml|<rss|<rdf:RDF/i.test(res.data.trim())) {
+              throw new Error(`Not RSS – URL か公開設定を確認してください\n${url}`);
+            }
+            const feed = await parser.parseString(fix(res.data));
+            return feed.items ?? [];
+          };
+
           (async () => {
-            const res = await axios.get(process.env.RSS_URL, { responseType: 'text', maxRedirects: 5 });
-            // HTML が返って来ると先頭が <html になる
-            if (!/^<\?xml|^<rdf:RDF|^<rss/i.test(res.data.trim())) {
-              throw new Error(`Not RSS – URL or privacy settingが違います\nURL=${process.env.RSS_URL}`);
+            // 最大 PAGE_MAX ページ取得（並列）
+            const pages   = Array.from({ length: PAGE_MAX }, (_, i) => i + 1);
+            const results = (await Promise.all(pages.map(fetchPage))).flat();
+
+            // 100 件に満たない場合でも slice で安全
+            const pool = results.slice(0, PAGE_MAX * 20);
+            if (!pool.length) throw new Error('公開ブックマークが 0 件です');
+
+            // ---- ランダムに PICK_NUM 件選択 ----
+            const picks = [];
+            while (picks.length < Math.min(PICK_NUM, pool.length)) {
+              const idx = Math.floor(Math.random() * pool.length);
+              picks.push(...pool.splice(idx, 1)); // 抽出した item を除去
             }
 
-            const parser = new Parser();
-            const feed   = await parser.parseString(res.data);
-
-            if (!feed.items?.length) throw new Error('公開ブックマークが 0 件です');
-            const pick = feed.items[Math.floor(Math.random() * feed.items.length)];
-
+            // ---- Discord へ送信 ----
             await axios.post(process.env.DISCORD_WEBHOOK_URL, {
               username: 'Hatena Random',
               avatar_url: 'https://b.hatena.ne.jp/favicon.ico',
-              embeds: [{ title: pick.title, url: pick.link, description: '🎲 今日のはてブ' }]
+              content: `🎲 今日のはてブ（全 ${pool.length + picks.length} 件中ランダム ${picks.length} 件）`,
+              embeds: picks.map((it) => ({
+                title: it.title,
+                url:   it.link,
+                description: (it.contentSnippet || '').slice(0, 180),
+                footer: { text: '提供: GitHub Actions' }
+              }))
             });
-            console.log('Sent:', pick.title);
-          })().catch(e => { console.error('FAIL', e.message); process.exit(1); });
+
+            console.log('Sent', picks.length, 'items');
+          })().catch(err => {
+            console.error('FAIL', err.message || err);
+            process.exit(1);
+          }); 
           JS
 
